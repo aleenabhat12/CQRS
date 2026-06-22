@@ -1,9 +1,21 @@
-﻿using System;
+﻿#region Copyright
+// // -----------------------------------------------------------------------
+// // <copyright company="cdmdotnet Limited">
+// // 	Copyright cdmdotnet Limited. All rights reserved.
+// // </copyright>
+// // -----------------------------------------------------------------------
+#endregion
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using Cqrs.Authentication;
 using Cqrs.Configuration;
 using cdmdotnet.Logging;
+using Cqrs.Events;
+using Cqrs.Infrastructure;
 using Microsoft.ServiceBus;
-using Microsoft.ServiceBus.Messaging;
 using Microsoft.Practices.EnterpriseLibrary.Common.Configuration;
 using Microsoft.Practices.EnterpriseLibrary.WindowsAzure.TransientFaultHandling;
 using RetryPolicy = Microsoft.Practices.TransientFaultHandling.RetryPolicy;
@@ -12,39 +24,9 @@ namespace Cqrs.Azure.ServiceBus
 {
 	public abstract class AzureBus<TAuthenticationToken>
 	{
-		protected string ConnectionString { get; private set; }
-
-		protected string PrivateTopicName { get; private set; }
-
-		protected string PublicTopicName { get; private set; }
-
-		protected string PrivateTopicSubscriptionName { get; private set; }
-
-		protected string PublicTopicSubscriptionName { get; private set; }
+		protected string ConnectionString { get; set; }
 
 		protected IMessageSerialiser<TAuthenticationToken> MessageSerialiser { get; private set; }
-
-		protected TopicClient ServiceBusPublisher { get; private set; }
-
-		protected SubscriptionClient ServiceBusReceiver { get; private set; }
-
-		protected abstract string MessageBusConnectionStringConfigurationKey { get; }
-
-		protected abstract string PrivateTopicNameConfigurationKey { get; }
-
-		protected abstract string PublicTopicNameConfigurationKey { get; }
-
-		protected abstract string DefaultPrivateTopicName { get; }
-
-		protected abstract string DefaultPublicTopicName { get; }
-
-		protected abstract string PrivateTopicSubscriptionNameConfigurationKey { get; }
-
-		protected abstract string PublicTopicSubscriptionNameConfigurationKey { get; }
-
-		protected const string DefaultPrivateTopicSubscriptionName= "Root";
-
-		protected const string DefaultPublicTopicSubscriptionName = "Root";
 
 		protected IAuthenticationTokenHelper<TAuthenticationToken> AuthenticationTokenHelper { get; private set; }
 
@@ -54,63 +36,71 @@ namespace Cqrs.Azure.ServiceBus
 
 		protected IConfigurationManager ConfigurationManager { get; private set; }
 
+		protected IDictionary<Guid, IList<IEvent<TAuthenticationToken>>> EventWaits { get; private set; }
+
+		protected const int DefaultNumberOfReceiversCount = 1;
+
+		protected int NumberOfReceiversCount { get; set; }
+
+		protected const int DefaultMaximumConcurrentReceiverProcessesCount = 1;
+
+		protected int MaximumConcurrentReceiverProcessesCount { get; set; }
+
 		protected AzureBus(IConfigurationManager configurationManager, IMessageSerialiser<TAuthenticationToken> messageSerialiser, IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger, bool isAPublisher)
 		{
+			EventWaits = new ConcurrentDictionary<Guid, IList<IEvent<TAuthenticationToken>>>();
+
 			MessageSerialiser = messageSerialiser;
 			AuthenticationTokenHelper = authenticationTokenHelper;
 			CorrelationIdHelper = correlationIdHelper;
 			Logger = logger;
 			ConfigurationManager = configurationManager;
-			ConnectionString = ConfigurationManager.GetSetting(MessageBusConnectionStringConfigurationKey);
 
-			NamespaceManager namespaceManager = NamespaceManager.CreateFromConnectionString(ConnectionString);
-
+			// ReSharper disable DoNotCallOverridableMethodsInConstructor
+			UpdateSettings();
 			if (isAPublisher)
-				InstantiatePublishing(namespaceManager);
+				InstantiatePublishing();
+			// ReSharper restore DoNotCallOverridableMethodsInConstructor
 		}
 
-		protected void InstantiatePublishing(NamespaceManager namespaceManager)
+		protected virtual void SetConnectionStrings()
 		{
-			CheckPrivateEventTopicExists(namespaceManager);
-			CheckPublicTopicExists(namespaceManager);
-
-			ServiceBusPublisher = TopicClient.CreateFromConnectionString(ConnectionString, PublicTopicName);
+			ConnectionString = GetConnectionString();
+			Logger.LogSensitive(string.Format("Connection string settings set to {0}.", ConnectionString));
 		}
 
-		protected void InstantiateReceiving()
+		protected virtual void SetNumberOfReceiversCount()
+		{
+			NumberOfReceiversCount = GetCurrentNumberOfReceiversCount();
+			Logger.LogDebug(string.Format("Number of receivers settings set to {0}.", NumberOfReceiversCount));
+		}
+
+		protected virtual void SetMaximumConcurrentReceiverProcessesCount()
+		{
+			MaximumConcurrentReceiverProcessesCount = GetCurrentMaximumConcurrentReceiverProcessesCount();
+			Logger.LogDebug(string.Format("Number of receivers settings set to {0}.", MaximumConcurrentReceiverProcessesCount));
+		}
+
+		protected abstract string GetConnectionString();
+
+		protected virtual int GetCurrentNumberOfReceiversCount()
+		{
+			return DefaultNumberOfReceiversCount;
+		}
+
+		protected virtual int GetCurrentMaximumConcurrentReceiverProcessesCount()
+		{
+			return DefaultMaximumConcurrentReceiverProcessesCount;
+		}
+
+		protected abstract void InstantiatePublishing();
+
+		protected abstract void InstantiateReceiving();
+
+		protected virtual NamespaceManager GetNamespaceManager()
 		{
 			NamespaceManager namespaceManager = NamespaceManager.CreateFromConnectionString(ConnectionString);
-
-			CheckPrivateEventTopicExists(namespaceManager);
-			CheckPublicTopicExists(namespaceManager);
-
-			ServiceBusReceiver = SubscriptionClient.CreateFromConnectionString(ConnectionString, PublicTopicName, PublicTopicSubscriptionName);
-		}
-
-		protected virtual void CheckPrivateEventTopicExists(NamespaceManager namespaceManager)
-		{
-			CheckTopicExists(namespaceManager, PrivateTopicName = ConfigurationManager.GetSetting(PrivateTopicNameConfigurationKey) ?? DefaultPrivateTopicName, PrivateTopicSubscriptionName = ConfigurationManager.GetSetting(PrivateTopicSubscriptionNameConfigurationKey) ?? DefaultPrivateTopicSubscriptionName);
-		}
-
-		protected virtual void CheckPublicTopicExists(NamespaceManager namespaceManager)
-		{
-			CheckTopicExists(namespaceManager, PublicTopicName = ConfigurationManager.GetSetting(PublicTopicNameConfigurationKey) ?? DefaultPublicTopicName, PublicTopicSubscriptionName = ConfigurationManager.GetSetting(PublicTopicSubscriptionNameConfigurationKey) ?? DefaultPublicTopicSubscriptionName);
-		}
-
-		protected virtual void CheckTopicExists(NamespaceManager namespaceManager, string eventTopicName, string eventSubscriptionNames)
-		{
-			// Configure Queue Settings
-			var eventTopicDescription = new TopicDescription(eventTopicName)
-			{
-				MaxSizeInMegabytes = 5120,
-				DefaultMessageTimeToLive = new TimeSpan(0, 1, 0)
-			};
-			// Create the topic if it does not exist already
-			if (!namespaceManager.TopicExists(eventTopicDescription.Path))
-				namespaceManager.CreateTopic(eventTopicDescription.Path);
-
-			if (!namespaceManager.SubscriptionExists(eventTopicDescription.Path, eventSubscriptionNames))
-				namespaceManager.CreateSubscription(eventTopicDescription.Path, eventSubscriptionNames);
+			return namespaceManager;
 		}
 
 		/// <summary>
@@ -130,5 +120,51 @@ namespace Cqrs.Azure.ServiceBus
 				return retryPolicy;
 			}
 		}
+
+		protected virtual void StartSettingsChecking()
+		{
+			Guid currentCorrelationId;
+			try
+			{
+				currentCorrelationId = CorrelationIdHelper.GetCorrelationId();
+			}
+			catch (Exception)
+			{
+				currentCorrelationId = Guid.NewGuid();
+			}
+			Task.Factory.StartNew(() =>
+			{
+				// New thread remember
+				CorrelationIdHelper.SetCorrelationId(currentCorrelationId);
+
+				SpinWait.SpinUntil(ValidateSettingsHaveChanged, sleepInMilliseconds: 1000);
+
+				Logger.LogInfo("Connecting string settings for the Azure Service Bus changed and will now refresh.");
+
+				// Update the connection string and trigger a restart;
+				if (ValidateSettingsHaveChanged())
+					TriggerSettingsChecking();
+			});
+		}
+
+		protected virtual bool ValidateSettingsHaveChanged()
+		{
+			return ConnectionString != GetConnectionString()
+				||
+			NumberOfReceiversCount != GetCurrentNumberOfReceiversCount()
+				||
+			MaximumConcurrentReceiverProcessesCount != GetCurrentMaximumConcurrentReceiverProcessesCount();
+		}
+
+		protected virtual void UpdateSettings()
+		{
+			SetConnectionStrings();
+			SetNumberOfReceiversCount();
+			SetMaximumConcurrentReceiverProcessesCount();
+		}
+
+		protected abstract void TriggerSettingsChecking();
+
+		protected abstract void ApplyReceiverMessageHandler();
 	}
 }

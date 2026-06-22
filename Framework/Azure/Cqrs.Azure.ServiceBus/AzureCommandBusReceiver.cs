@@ -7,11 +7,13 @@
 #endregion
 
 using System;
+using System.Threading;
+using System.Threading.Tasks;
+using cdmdotnet.Logging;
 using Cqrs.Authentication;
 using Cqrs.Bus;
 using Cqrs.Commands;
 using Cqrs.Configuration;
-using cdmdotnet.Logging;
 using Cqrs.Messages;
 using Microsoft.ServiceBus.Messaging;
 
@@ -22,45 +24,76 @@ namespace Cqrs.Azure.ServiceBus
 		, ICommandHandlerRegistrar
 		, ICommandReceiver<TAuthenticationToken>
 	{
-		private static RouteManager Routes { get; set; }
+		// ReSharper disable StaticMemberInGenericType
+		protected static RouteManager Routes { get; private set; }
+		// ReSharper restore StaticMemberInGenericType
 
 		static AzureCommandBusReceiver()
 		{
 			Routes = new RouteManager();
 		}
 
-		public AzureCommandBusReceiver(IConfigurationManager configurationManager, IMessageSerialiser<TAuthenticationToken> messageSerialiser, IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger)
-			: base(configurationManager, messageSerialiser, authenticationTokenHelper, correlationIdHelper, logger, false)
+		public AzureCommandBusReceiver(IConfigurationManager configurationManager, IMessageSerialiser<TAuthenticationToken> messageSerialiser, IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger, IAzureBusHelper<TAuthenticationToken> azureBusHelper)
+			: base(configurationManager, messageSerialiser, authenticationTokenHelper, correlationIdHelper, logger, azureBusHelper, false)
 		{
 		}
 
-		public virtual void RegisterHandler<TMessage>(Action<TMessage> handler, Type targetedType)
+		public virtual void RegisterHandler<TMessage>(Action<TMessage> handler, Type targetedType, bool holdMessageLock = true)
 			where TMessage : IMessage
 		{
-			Routes.RegisterHandler(handler, targetedType);
+			AzureBusHelper.RegisterHandler(Routes, handler, targetedType, holdMessageLock);
 		}
 
 		/// <summary>
 		/// Register an event or command handler that will listen and respond to events or commands.
 		/// </summary>
-		public void RegisterHandler<TMessage>(Action<TMessage> handler)
+		public void RegisterHandler<TMessage>(Action<TMessage> handler, bool holdMessageLock = true)
 			where TMessage : IMessage
 		{
-			RegisterHandler(handler, null);
+			RegisterHandler(handler, null, holdMessageLock);
 		}
 
 		protected virtual void ReceiveCommand(BrokeredMessage message)
 		{
+			var brokeredMessageRenewCancellationTokenSource = new CancellationTokenSource();
 			try
 			{
 				Logger.LogDebug(string.Format("A command message arrived with the id '{0}'.", message.MessageId));
 				string messageBody = message.GetBody<string>();
-				ICommand<TAuthenticationToken> command = MessageSerialiser.DeserialiseCommand(messageBody);
 
-				CorrelationIdHelper.SetCorrelationId(command.CorrelationId);
-				Logger.LogInfo(string.Format("A command message arrived with the id '{0}' was of type {1}.", message.MessageId, command.GetType().FullName));
 
-				ReceiveCommand(command);
+				AzureBusHelper.ReceiveCommand(messageBody, ReceiveCommand,
+					string.Format("id '{0}'", message.MessageId),
+					() =>
+					{
+						// Remove message from queue
+						message.Complete();
+						Logger.LogDebug(string.Format("A command message arrived with the id '{0}' but processing was skipped due to command settings.", message.MessageId));
+					},
+					() =>
+					{
+						Task.Factory.StartNew(() =>
+						{
+							long loop = long.MinValue;
+							while (!brokeredMessageRenewCancellationTokenSource.Token.IsCancellationRequested)
+							{
+								//Based on LockedUntilUtc property to determine if the lock expires soon
+								if (DateTime.UtcNow > message.LockedUntilUtc.AddSeconds(-10))
+								{
+									// If so, repeat the message
+									message.RenewLock();
+								}
+
+								if (loop++ % 5 == 0)
+									Thread.Yield();
+								else
+									Thread.Sleep(500);
+								if (loop == long.MaxValue)
+									loop = long.MinValue;
+							}
+						}, brokeredMessageRenewCancellationTokenSource.Token);
+					}
+				);
 
 				// Remove message from queue
 				message.Complete();
@@ -72,35 +105,16 @@ namespace Cqrs.Azure.ServiceBus
 				Logger.LogError(string.Format("A command message arrived with the id '{0}' but failed to be process.", message.MessageId), exception: exception);
 				message.Abandon();
 			}
+			finally
+			{
+				// Cancel the lock of renewing the task
+				brokeredMessageRenewCancellationTokenSource.Cancel();
+			}
 		}
 
 		public virtual void ReceiveCommand(ICommand<TAuthenticationToken> command)
 		{
-			Type commandType = command.GetType();
-			switch (command.Framework)
-			{
-				case FrameworkType.Akka:
-					Logger.LogInfo(string.Format("A command arrived of the type '{0}' but was marked as coming from the '{1}' framework, so it was dropped.", commandType.FullName, command.Framework));
-					return;
-			}
-
-			CorrelationIdHelper.SetCorrelationId(command.CorrelationId);
-			AuthenticationTokenHelper.SetAuthenticationToken(command.AuthenticationToken);
-
-			bool isRequired;
-			if (!ConfigurationManager.TryGetSetting(string.Format("{0}.IsRequired", commandType.FullName), out isRequired))
-				isRequired = true;
-
-			RouteHandlerDelegate commandHandler = Routes.GetSingleHandler(command, isRequired);
-			// This check doesn't require an isRequired check as there will be an exception raised above and handled below.
-			if (commandHandler == null)
-			{
-				Logger.LogDebug(string.Format("The command handler for '{0}' is not required.", commandType.FullName));
-				return;
-			}
-
-			Action<IMessage> handler = commandHandler.Delegate;
-			handler(command);
+			AzureBusHelper.DefaultReceiveCommand(command, Routes, "Azure-ServiceBus");
 		}
 
 		#region Implementation of ICommandReceiver
@@ -117,7 +131,7 @@ namespace Cqrs.Azure.ServiceBus
 			};
 
 			// Callback to handle received messages
-			ServiceBusReceiver.OnMessage(ReceiveCommand, options);
+			RegisterReceiverMessageHandler(ReceiveCommand, options);
 		}
 
 		#endregion

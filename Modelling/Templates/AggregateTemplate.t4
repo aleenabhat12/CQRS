@@ -55,6 +55,7 @@ namespace <#= classNamespace #>
 <#
 	// Class and Attributes
 #>
+<# WriteSummaryComment(this.Element.Description); #>
 	<#= GetGeneratedCodeAttribute() #>
 	public <#= GetAbstract(this.Element) #> partial class <#= className #> : <#= baseClass #>
 	{
@@ -128,13 +129,21 @@ switch(aggregateTechnology)
 #>
 
 <#
-		IList<IOperation> collectionMethods = GetMethodList(this.Element);
+IList<IOperation> collectionMethods = GetMethodList(this.Element);
+switch(aggregateTechnology)
+{
+	case "Akka":
 		// Methods
 		foreach(IOperation collectionMethod in collectionMethods)
 		{
 #>
 			Receive<<#= collectionMethod.Name #>Parameters>(parameters => <#= collectionMethod.Name #>(parameters));
 <#
+		}
+		break;
+	default:
+		// for now do nothing
+		break;
 }
 #>
 		}
@@ -188,6 +197,14 @@ switch(aggregateTechnology)
 			DependencyResolver = dependencyResolver;
 			Log = log;
 			Rsn = rsn;
+<#
+			foreach(IProperty collectionProperty in collectionProperties.Where(property => property.UpperValue != null && property.UpperValue.ToString() == "*").ToList())
+			{
+#>
+			<#= collectionProperty.Name #> = new List<<#= GetDisplayType(collectionProperty) #>>();
+<#
+			}
+#>
 		}
 <#
 		// Methods
@@ -651,12 +668,16 @@ switch(aggregateTechnology)
 
 		foreach(IAssociation relationship in relationships)
 		{
+			string relationshipName = relationship.Name;
+			if (string.IsNullOrWhiteSpace(relationshipName))
+				relationshipName = ((INamedElement)relationship.SourceElement).Name;
 			string targetElementName = ((INamedElement)relationship.TargetElement).Name;
 			IList<IProperty> relationshipProperties = GetPropertyList((IClass)relationship.SourceElement).Where(property=> property.Type != relationship.TargetElement && property.Type != relationship.SourceElement).ToList();
 			IEnumerable<IAssociation> eventRelationships = this.Element.GetRelatedLinks<IAssociation>().Where(associationEnd => associationEnd.Name == relationship.Name && associationEnd.SourceElement == this.Element);
 #>
 
-		public void <#= relationship.Name #>(<#
+<# WriteSummaryComment(relationship.Description); #>
+		public void <#= relationshipName #>(<#
 			for (int i = 0; i < relationshipProperties.Count; i++)
 			{
 				IProperty relationshipProperty = relationshipProperties.ElementAt(i);
@@ -664,7 +685,7 @@ switch(aggregateTechnology)
 			}
 #>)
 		{
-			Log.LogDebug("Entered", "<#= className #>/<#= relationship.Name #>");
+			Log.LogDebug("Entered", "<#= className #>/<#= relationshipName #>");
 
 <#
 			string eventParameters = "";
@@ -689,13 +710,13 @@ switch(aggregateTechnology)
 			}
 #>
 
-			On<#= relationship.Name #>(<#
+			On<#= relationshipName #>(<#
 			for (int i = 0; i < relationshipProperties.Count; i++)
 			{
 				IProperty relationshipProperty = relationshipProperties.ElementAt(i);
 				#><#= (i == 0) ? string.Empty : ", " #><#= GetLowercaseFirstCharacter(relationshipProperty.Name) #><#
 			}
-#><#= eventParameters #>);
+#><#= eventParameters.Substring(relationshipProperties.Any() ? 0 : 2) #>);
 <#
 			foreach(IAssociation eventRelationship in eventRelationships)
 			{
@@ -703,36 +724,36 @@ switch(aggregateTechnology)
 #>
 			if (<#= GetLowercaseFirstCharacter(eventTargetElementName) #>Event != null)
 			{
-				Log.LogDebug("Pre", "<#= className #>/<#= relationship.Name #>/ApplyChange/<#= eventTargetElementName #>");
+				Log.LogDebug("Pre", "<#= className #>/<#= relationshipName #>/ApplyChange/<#= eventTargetElementName #>");
 				ApplyChange(<#= GetLowercaseFirstCharacter(eventTargetElementName) #>Event);
-				Log.LogDebug("Post", "<#= className #>/<#= relationship.Name #>/ApplyChange/<#= eventTargetElementName #>");
+				Log.LogDebug("Post", "<#= className #>/<#= relationshipName #>/ApplyChange/<#= eventTargetElementName #>");
 			}
 <#
 			}
 #>
 
-			Log.LogDebug("Pre", "<#= className #>/<#= relationship.Name #>/On<#= relationship.Name #>Handled");
-			On<#= relationship.Name #>Handled(<#
+			Log.LogDebug("Pre", "<#= className #>/<#= relationshipName #>/On<#= relationshipName #>Handled");
+			On<#= relationshipName #>Handled(<#
 			for (int i = 0; i < relationshipProperties.Count; i++)
 			{
 				IProperty relationshipProperty = relationshipProperties.ElementAt(i);
 				#><#= (i == 0) ? string.Empty : ", " #><#= GetLowercaseFirstCharacter(relationshipProperty.Name) #><#
 			}
 #>);
-			Log.LogDebug("Post", "<#= className #>/<#= relationship.Name #>/On<#= relationship.Name #>Handled");
+			Log.LogDebug("Post", "<#= className #>/<#= relationshipName #>/On<#= relationshipName #>Handled");
 
-			Log.LogDebug("Exited", "<#= className #>/<#= relationship.Name #>");
+			Log.LogDebug("Exited", "<#= className #>/<#= relationshipName #>");
 		}
 
-		partial void On<#= relationship.Name #>(<#
+		partial void On<#= relationshipName #>(<#
 			for (int i = 0; i < relationshipProperties.Count; i++)
 			{
 				IProperty relationshipProperty = relationshipProperties.ElementAt(i);
 				#><#= (i == 0) ? string.Empty : ", " #><#= GetFullDisplayType(relationshipProperty) #> <#= GetLowercaseFirstCharacter(relationshipProperty.Name) #><#
 			}
-#><#= eventParametersWithType #>);
+#><#= eventParametersWithType.Substring(relationshipProperties.Any() ? 0 : 2) #>);
 
-		partial void On<#= relationship.Name #>Handled(<#
+		partial void On<#= relationshipName #>Handled(<#
 			for (int i = 0; i < relationshipProperties.Count; i++)
 			{
 				IProperty relationshipProperty = relationshipProperties.ElementAt(i);

@@ -10,11 +10,12 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
+using cdmdotnet.Logging;
 using Cqrs.Authentication;
 using Cqrs.Configuration;
-using cdmdotnet.Logging;
 using Cqrs.Events;
 using Microsoft.ServiceBus.Messaging;
+using SpinWait = Cqrs.Infrastructure.SpinWait;
 
 namespace Cqrs.Azure.ServiceBus
 {
@@ -24,8 +25,8 @@ namespace Cqrs.Azure.ServiceBus
 
 		protected ReaderWriterLockSlim QueueTrackerLock { get; private set; }
 
-		public AzureQueuedEventBusReceiver(IConfigurationManager configurationManager, IMessageSerialiser<TAuthenticationToken> messageSerialiser, IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger)
-			: base(configurationManager, messageSerialiser, authenticationTokenHelper, correlationIdHelper, logger)
+		public AzureQueuedEventBusReceiver(IConfigurationManager configurationManager, IMessageSerialiser<TAuthenticationToken> messageSerialiser, IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger, IAzureBusHelper<TAuthenticationToken> azureBusHelper)
+			: base(configurationManager, messageSerialiser, authenticationTokenHelper, correlationIdHelper, logger, azureBusHelper)
 		{
 			QueueTracker = new ConcurrentDictionary<string, ConcurrentQueue<IEvent<TAuthenticationToken>>>();
 			QueueTrackerLock = new ReaderWriterLockSlim();
@@ -109,57 +110,64 @@ namespace Cqrs.Azure.ServiceBus
 
 		protected void DequeuAndProcessEvent(string queueName)
 		{
-			while (true)
-			{
-				try
+			SpinWait.SpinUntil
+			(
+				() =>
 				{
-					ConcurrentQueue<IEvent<TAuthenticationToken>> queue;
-					if (QueueTracker.TryGetValue(queueName, out queue))
+					try
 					{
-						while (!queue.IsEmpty)
+						ConcurrentQueue<IEvent<TAuthenticationToken>> queue;
+						if (QueueTracker.TryGetValue(queueName, out queue))
 						{
-							IEvent<TAuthenticationToken> @event;
-							if (queue.TryDequeue(out @event))
+							while (!queue.IsEmpty)
 							{
-								try
+								IEvent<TAuthenticationToken> @event;
+								if (queue.TryDequeue(out @event))
 								{
-									CorrelationIdHelper.SetCorrelationId(@event.CorrelationId);
+									try
+									{
+										CorrelationIdHelper.SetCorrelationId(@event.CorrelationId);
+									}
+									catch (Exception exception)
+									{
+										Logger.LogError(string.Format("Trying to set the CorrelationId from the event type {1} for a request for the queue '{0}' failed.", queueName, @event.GetType()), exception: exception);
+									}
+									try
+									{
+										AuthenticationTokenHelper.SetAuthenticationToken(@event.AuthenticationToken);
+									}
+									catch (Exception exception)
+									{
+										Logger.LogError(string.Format("Trying to set the AuthenticationToken from the event type {1} for a request for the queue '{0}' failed.", queueName, @event.GetType()), exception: exception);
+									}
+									try
+									{
+										ReceiveEvent(@event);
+									}
+									catch (Exception exception)
+									{
+										Logger.LogError(string.Format("Processing the event type {1} for a request for the queue '{0}' failed.", queueName, @event.GetType()), exception: exception);
+										queue.Enqueue(@event);
+									}
 								}
-								catch (Exception exception)
-								{
-									Logger.LogError(string.Format("Trying to set the CorrelationId from the event type {1} for a request for the queue '{0}' failed.", queueName, @event.GetType()), exception: exception);
-								}
-								try
-								{
-									AuthenticationTokenHelper.SetAuthenticationToken(@event.AuthenticationToken);
-								}
-								catch (Exception exception)
-								{
-									Logger.LogError(string.Format("Trying to set the AuthenticationToken from the event type {1} for a request for the queue '{0}' failed.", queueName, @event.GetType()), exception: exception);
-								}
-								try
-								{
-									ReceiveEvent(@event);
-								}
-								catch (Exception exception)
-								{
-									Logger.LogError(string.Format("Processing the event type {1} for a request for the queue '{0}' failed.", queueName, @event.GetType()), exception: exception);
-									queue.Enqueue(@event);
-								}
+								else
+									Logger.LogDebug(string.Format("Trying to dequeue a event from the queue '{0}' failed.", queueName));
 							}
-							else
-								Logger.LogDebug(string.Format("Trying to dequeue a event from the queue '{0}' failed.", queueName));
 						}
+						else
+							Logger.LogDebug(string.Format("Trying to find the queue '{0}' failed.", queueName));
+						Thread.Sleep(100);
 					}
-					else
-						Logger.LogDebug(string.Format("Trying to find the queue '{0}' failed.", queueName));
-					Thread.Sleep(100);
-				}
-				catch (Exception exception)
-				{
-					Logger.LogError(string.Format("Dequeuing and processing a request for the queue '{0}' failed.", queueName), exception: exception);
-				}
-			}
+					catch (Exception exception)
+					{
+						Logger.LogError(string.Format("Dequeuing and processing a request for the queue '{0}' failed.", queueName), exception: exception);
+					}
+
+					// Always return false to keep this spinning.
+					return false;
+				},
+				sleepInMilliseconds: 1000
+			);
 		}
 
 		public int QueueCount

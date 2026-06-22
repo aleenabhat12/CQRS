@@ -38,6 +38,7 @@ switch(eventHandlerTechnology)
 		break;
 }
 #>
+using cdmdotnet.Logging;
 using Cqrs.Events;
 using Cqrs.Domain;
 
@@ -79,6 +80,13 @@ switch(eventHandlerTechnology)
 		break;
 }
 #>
+
+		public <#= className #>EventHandler(ILogger logger)
+		{
+			Logger = logger;
+		}
+
+		protected ILogger Logger { get; private set; }
 
 		#region Implementation of IEventHandler<in <#= className #>>
 

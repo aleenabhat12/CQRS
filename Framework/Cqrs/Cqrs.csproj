@@ -49,8 +49,8 @@
     <DocumentationFile>bin\Release\Cqrs.xml</DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="cdmdotnet.Logging, Version=1.1.35.25, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\cdmdotnet.Logging.1.1.35.25\lib\net40\cdmdotnet.Logging.dll</HintPath>
+    <Reference Include="cdmdotnet.Logging, Version=1.1.42.30, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\..\packages\cdmdotnet.Logging.1.1.42.30\lib\net40\cdmdotnet.Logging.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="cdmdotnet.Performance, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
@@ -76,10 +76,21 @@
     <Reference Include="System.Web" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Authentication\DefaultSingleSignOnTokenValueHelper.cs" />
+    <Compile Include="Authentication\DefaultSingleSignOnTokenFactory.cs" />
+    <Compile Include="Authentication\IDefaultSingleSignOnTokenFactory.cs" />
+    <Compile Include="Authentication\SingleSignOnTokenWithUserRsnAndCompanyRsn.cs" />
+    <Compile Include="Authentication\SingleSignOnTokenWithCompanyRsn.cs" />
+    <Compile Include="Authentication\ISingleSignOnTokenWithUserRsnAndCompanyRsn.cs" />
+    <Compile Include="Authentication\ISingleSignOnTokenWithCompanyRsn.cs" />
+    <Compile Include="Authentication\SingleSignOnTokenWithUserRsn.cs" />
+    <Compile Include="Authentication\ISingleSignOnTokenWithUserRsn.cs" />
     <Compile Include="Authentication\WebSingleSignOnTokenValueHelper.cs" />
     <Compile Include="Authentication\ISingleSignOnTokenFactory.cs" />
     <Compile Include="Authentication\SingleSignOnTokenFactory.cs" />
     <Compile Include="Authentication\SingleSignOnTokenResolver.cs" />
+    <Compile Include="Bus\BusHelper.cs" />
+    <Compile Include="Bus\IBusHelper.cs" />
     <Compile Include="Bus\NoHandlersRegisteredException.cs" />
     <Compile Include="Bus\MultipleHandlersRegisteredException.cs" />
     <Compile Include="Bus\NoHandlerRegisteredException.cs" />
@@ -95,6 +106,7 @@
     <Compile Include="Commands\DtoCommand.cs" />
     <Compile Include="Commands\DtoCommandHandler.cs" />
     <Compile Include="Commands\ICommandReceiver.cs" />
+    <Compile Include="Commands\ISendAndWaitCommandSender.cs" />
     <Compile Include="Commands\ICommandValidator.cs" />
     <Compile Include="Commands\MultipleHandlersRegisteredException.cs" />
     <Compile Include="Commands\NoCommandHandlerRegisteredException.cs" />
@@ -131,7 +143,9 @@
     <Compile Include="Entities\Entity.cs" />
     <Compile Include="Entities\Range.cs" />
     <Compile Include="Events\EventDataResolver.cs" />
-    <Compile Include="Events\SqlEventBuilder.cs" />
+    <Compile Include="Events\EventStoreRetentionLevelAttribute.cs" />
+    <Compile Include="Events\MemoryCacheEventStore.cs" />
+    <Compile Include="Events\DefaultEventBuilder.cs" />
     <Compile Include="Events\DtoAggregateEventType.cs" />
     <Compile Include="Events\DuplicateCreateCommandEvent.cs" />
     <Compile Include="Events\EventData.cs" />
@@ -149,6 +163,7 @@
     <Compile Include="Events\DtoAggregateEvent.cs" />
     <Compile Include="Events\NoEventHandlerRegisteredException.cs" />
     <Compile Include="Events\SqlEventStore.cs" />
+    <Compile Include="Infrastructure\SpinWait.cs" />
     <Compile Include="Messages\FrameworkType.cs" />
     <Compile Include="Messages\IHandler.cs" />
     <Compile Include="Messages\IMessageWithAuthenticationToken.cs" />
@@ -250,6 +265,7 @@
     <Folder Include="Repositories\Authentication\" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="tools\EventStoreTable-SqlServer-Migration.sql" />
     <Content Include="tools\EventStoreTable-SqlServer.sql" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />

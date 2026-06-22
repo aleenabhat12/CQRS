@@ -33,9 +33,11 @@ namespace Cqrs.Bus
 
 		protected IConfigurationManager ConfigurationManager { get; private set; }
 
+		protected IBusHelper BusHelper { get; private set; }
+
 		protected abstract IDictionary<Type, IList<Action<IMessage>>> Routes { get; }
 
-		protected QueuedCommandBusReceiver(IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger, IConfigurationManager configurationManager)
+		protected QueuedCommandBusReceiver(IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger, IConfigurationManager configurationManager, IBusHelper busHelper)
 		{
 			QueueTracker = new ConcurrentDictionary<string, ConcurrentQueue<ICommand<TAuthenticationToken>>>();
 			QueueTrackerLock = new ReaderWriterLockSlim();
@@ -43,6 +45,7 @@ namespace Cqrs.Bus
 			CorrelationIdHelper = correlationIdHelper;
 			Logger = logger;
 			ConfigurationManager = configurationManager;
+			BusHelper = busHelper;
 		}
 
 		protected virtual void EnqueueCommand(string targetQueueName, ICommand<TAuthenticationToken> command)
@@ -81,6 +84,7 @@ namespace Cqrs.Bus
 
 		protected virtual void DequeuAndProcessCommand(string queueName)
 		{
+			long loop = long.MinValue;
 			while (true)
 			{
 				try
@@ -125,7 +129,13 @@ namespace Cqrs.Bus
 					}
 					else
 						Logger.LogDebug(string.Format("Trying to find the queue '{0}' failed.", queueName));
-					Thread.Sleep(100);
+
+					if (loop++ % 5 == 0)
+						Thread.Yield();
+					else
+						Thread.Sleep(100);
+					if (loop == long.MaxValue)
+						loop = long.MinValue;
 				}
 				catch (Exception exception)
 				{
@@ -173,9 +183,7 @@ namespace Cqrs.Bus
 
 			Type commandType = command.GetType();
 
-			bool isRequired;
-			if (!ConfigurationManager.TryGetSetting(string.Format("{0}.IsRequired", commandType.FullName), out isRequired))
-				isRequired = true;
+			bool isRequired = BusHelper.IsEventRequired(commandType);
 
 			IList<Action<IMessage>> handlers;
 			if (Routes.TryGetValue(commandType, out handlers))

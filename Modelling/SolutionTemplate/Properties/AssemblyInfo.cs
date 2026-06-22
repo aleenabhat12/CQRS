@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("SolutionTemplate")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
+[assembly: AssemblyCompany("cdmdotnet Limited")]
 [assembly: AssemblyProduct("SolutionTemplate")]
 [assembly: AssemblyCopyright("")]
 [assembly: AssemblyTrademark("")]

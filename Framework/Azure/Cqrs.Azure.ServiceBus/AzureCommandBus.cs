@@ -1,11 +1,22 @@
-﻿using Cqrs.Authentication;
+﻿#region Copyright
+// // -----------------------------------------------------------------------
+// // <copyright company="cdmdotnet Limited">
+// // 	Copyright cdmdotnet Limited. All rights reserved.
+// // </copyright>
+// // -----------------------------------------------------------------------
+#endregion
+
+using System;
+using Cqrs.Authentication;
 using Cqrs.Configuration;
 using cdmdotnet.Logging;
 
 namespace Cqrs.Azure.ServiceBus
 {
-	public abstract class AzureCommandBus<TAuthenticationToken> : AzureBus<TAuthenticationToken>
+	public abstract class AzureCommandBus<TAuthenticationToken> : AzureServiceBus<TAuthenticationToken>
 	{
+		#region Overrides of AzureServiceBus<TAuthenticationToken>
+
 		protected override string MessageBusConnectionStringConfigurationKey
 		{
 			get { return "Cqrs.Azure.CommandBus.ConnectionString"; }
@@ -41,9 +52,14 @@ namespace Cqrs.Azure.ServiceBus
 			get { return "Cqrs.CommandBus"; }
 		}
 
-		protected AzureCommandBus(IConfigurationManager configurationManager, IMessageSerialiser<TAuthenticationToken> messageSerialiser, IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger, bool isAPublisher)
+		#endregion
+
+		protected IAzureBusHelper<TAuthenticationToken> AzureBusHelper { get; private set; }
+
+		protected AzureCommandBus(IConfigurationManager configurationManager, IMessageSerialiser<TAuthenticationToken> messageSerialiser, IAuthenticationTokenHelper<TAuthenticationToken> authenticationTokenHelper, ICorrelationIdHelper correlationIdHelper, ILogger logger, IAzureBusHelper<TAuthenticationToken> azureBusHelper, bool isAPublisher)
 			: base(configurationManager, messageSerialiser, authenticationTokenHelper, correlationIdHelper, logger, isAPublisher)
 		{
+			AzureBusHelper = azureBusHelper;
 		}
 	}
 }

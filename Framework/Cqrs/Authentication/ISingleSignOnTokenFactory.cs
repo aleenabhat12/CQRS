@@ -10,13 +10,14 @@ using System.ServiceModel;
 
 namespace Cqrs.Authentication
 {
-	[ServiceContract(Namespace = "http://cqrs.co.nz/SingleSignOn/TokenFactory")]
-	public interface ISingleSignOnTokenFactory
+	[ServiceContract(Namespace = "https://getcqrs.net/SingleSignOn/TokenFactory")]
+	public interface ISingleSignOnTokenFactory<TSingleSignOnToken>
+			where TSingleSignOnToken : ISingleSignOnToken, new()
 	{
 		[OperationContract]
-		ISingleSignOnToken CreateNew(int timeoutInMinutes = 360);
+		TSingleSignOnToken CreateNew(int timeoutInMinutes = 360);
 
 		[OperationContract]
-		ISingleSignOnToken RenewTokenExpiry(ISingleSignOnToken token, int timeoutInMinutes = 360);
+		TSingleSignOnToken RenewTokenExpiry(TSingleSignOnToken token, int timeoutInMinutes = 360);
 	}
 }

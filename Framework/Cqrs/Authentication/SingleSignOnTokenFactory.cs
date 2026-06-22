@@ -10,11 +10,12 @@ using System;
 
 namespace Cqrs.Authentication
 {
-	public class SingleSignOnTokenFactory : ISingleSignOnTokenFactory
+	public class SingleSignOnTokenFactory<TSingleSignOnToken> : ISingleSignOnTokenFactory<TSingleSignOnToken>
+			where TSingleSignOnToken : ISingleSignOnToken, new()
 	{
-		public ISingleSignOnToken CreateNew(int timeoutInMinutes = 360)
+		public virtual TSingleSignOnToken CreateNew(int timeoutInMinutes = 360)
 		{
-			var token = new SingleSignOnToken
+			var token = new TSingleSignOnToken
 			{
 				Token = Guid.NewGuid().ToString("N"),
 				DateIssued = DateTime.UtcNow,
@@ -24,7 +25,7 @@ namespace Cqrs.Authentication
 			return RenewTokenExpiry(token, timeoutInMinutes);
 		}
 
-		public ISingleSignOnToken RenewTokenExpiry(ISingleSignOnToken token, int timeoutInMinutes = 360)
+		public virtual TSingleSignOnToken RenewTokenExpiry(TSingleSignOnToken token, int timeoutInMinutes = 360)
 		{
 			token.TimeOfExpiry = DateTime.UtcNow.AddMinutes(timeoutInMinutes);
 
